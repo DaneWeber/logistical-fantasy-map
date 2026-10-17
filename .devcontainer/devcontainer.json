@@ -1,0 +1,63 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/typescript-node
+{
+	"name": "Full DevContainer",
+	// A Dockerfile rather than "image" so that the system packages this repo
+	// needs (texlive, Playwright's shared libraries) sit in cached image layers.
+	// They used to be apt-get calls in postCreateCommand, which is not cached
+	// and so re-ran on every "Rebuild Container".
+	"build": {
+		"dockerfile": "Dockerfile"
+	},
+	"features": {
+		"ghcr.io/devcontainers-extra/features/pnpm:2": {},
+		"ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {},
+		"ghcr.io/devcontainers/features/github-cli:1": {},
+		"ghcr.io/helpers4/devcontainer/pnpm-store:1": {}
+	},
+	// Fixes up the ownership of the volume mounts below, then returns -- the two
+	// slow steps it used to run inline (Playwright's chromium download and the
+	// dev build of the bnb-ext VS Code extension) are launched detached into
+	// .devcontainer/deferred-setup.sh, so the container reports ready while they
+	// finish. Follow them with `tail -f /tmp/devcontainer-deferred-setup.log`.
+	// Refresh the extension build after editing bnb-ext with `pnpm ext:install`
+	// -- no container rebuild needed.
+	"postCreateCommand": "bash .devcontainer/post-create.sh",
+	// This image's default container user is actually root (verify with
+	// `docker inspect <image> --format '{{.Config.User}}'`). Pin the non-root
+	// "node" user (uid 1000) explicitly so files created in the bind-mounted
+	// workspace aren't owned by root on the host -- that breaks any tool
+	// (pnpm install, etc.) run against the same files outside a container
+	// afterwards.
+	"remoteUser": "node",
+	// Keep Claude Code's login and initial setup across container rebuilds.
+	// CLAUDE_CONFIG_DIR gathers .claude.json (onboarding flags, per-project trust)
+	// into the same directory as .credentials.json, and that directory is a named
+	// Docker volume, so "Rebuild Container" leaves it untouched. Only the pointer
+	// to the volume is committed here -- no credentials.
+	//
+	// The second volume does the same for Playwright's browser builds. Purely a
+	// speed optimization -- deferred-setup.sh would re-download them otherwise,
+	// and they're ~650MB.
+	"mounts": [
+		"source=beefbrain-claude-config,target=/home/node/.claude,type=volume",
+		"source=beefbrain-playwright-browsers,target=/home/node/.cache/ms-playwright,type=volume",
+		"source=projectname-bashhistory,target=/commandhistory,type=volume"
+	],
+	"remoteEnv": {
+		"CLAUDE_CONFIG_DIR": "/home/node/.claude",
+		// Already Playwright's default location, but naming it explicitly keeps
+		// the volume above and post-create.sh's chown pointed at one path.
+		"PLAYWRIGHT_BROWSERS_PATH": "/home/node/.cache/ms-playwright"
+	},
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-playwright.playwright",
+				"svelte.svelte-vscode",
+				"github.vscode-github-actions",
+				"dbaeumer.vscode-eslint"
+			]
+		}
+	}
+}
