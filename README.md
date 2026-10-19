@@ -40,7 +40,9 @@ on a plain.
 **Rules** between two places:
 - *Distance between*: a minimum and/or maximum, in km, as the crow flies.
 - *Mountains between*: the straight line between them crosses ground at least
-  1000 m high and at least 300 m above both towns.
+  1000 m high and at least 300 m above both towns. On maps smaller than
+  800 km both heights shrink with relief (about 250 m and 75 m on a 16 km
+  locale), so it reads as a ridge between two villages.
 - *On the same river*: one is downstream of the other on the same river.
 
 Unsatisfied facts show in red, with a reason, both in the panels and on the map.
@@ -96,6 +98,29 @@ them move.
   adopt one as a fact.
 - **Export PNG** renders the whole map at 2400 px wide.
 
+## Map scale
+
+**World → Map size** sets the map from 5 km across up to continent size,
+with presets for a *Locale* (16 × 16 km), *Region*, *Realm* and *Continent*.
+Terrain is tuned for maps of 800 km and up. On smaller maps the natural
+feature sizes (valley spacing, ridge widths, coastline wiggle, implicit
+features) and local relief shrink, and the river threshold shrinks with the
+map's area. A locale gets creeks and spurs rather than a miniature
+continent. Brush sizes, new ridges and the km sliders scale with the map too.
+
+You can zoom from the whole map down to a few hundred metres across. Once a
+terrain cell covers more than a couple of screen pixels, the view switches
+to **detail tiles**, rendered in web workers. They add relief below the
+engine's grid, plus ragged coastlines and lake shores. Contours are
+re-derived at an interval that suits the zoom. The detail is a deterministic
+function of position: it stays faithful to the engine at cell scale and
+looks the same every time you return. Rivers gain bends as you zoom and,
+up close, are drawn at a plausible true width. Mountain and hill symbols
+stay the same size on screen. Zooming in only adds symbols between the
+existing ones, and their density stops at the terrain's real resolution.
+From there, shading, contours and spot heights describe the ground. The
+scale bar shows kilometres and miles.
+
 ## Code layout
 
 ```
@@ -109,7 +134,11 @@ src/engine/        pure TypeScript, no DOM; runs in a Web Worker
   shaping.ts       turns unmet facts into implicit terrain features
   doc.ts           defaults and JSON (de)serialisation
 src/ui/            React app, canvas renderer
-tests/             vitest suite for the engine
+  render.ts        scene, terrain drawing, rivers, labels
+  detail.ts        sub-cell terrain model and tile rendering (no DOM)
+  tiles.ts         tile cache and worker pool; tileWorker.ts runs renderTile
+  glyphs.ts        screen-sized mountain/hill symbols on a quadtree lattice
+tests/             vitest suite for the engine and the detail renderer
 scripts/           dev aids: preview.ts (render a PNG in Node), shot.mjs (browser screenshot)
 ```
 

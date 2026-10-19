@@ -1,4 +1,4 @@
-import { makeGrid } from './grid';
+import { lengthScale, makeGrid } from './grid';
 import type { PaintLayer, WorldDoc, WorldSettings } from './types';
 
 export const DEFAULT_SETTINGS: WorldSettings = {
@@ -16,6 +16,35 @@ export const DEFAULT_SETTINGS: WorldSettings = {
   autoTowns: 0,
   minTownSpacingKm: 20,
 };
+
+/** Sensible size for a newly drawn ridge on this map: 40 km wide, 2000 m on big maps. */
+export function defaultRidge(settings: WorldSettings): { heightM: number; widthKm: number } {
+  const s = lengthScale(settings.widthKm, settings.heightKm);
+  const cellKm = settings.widthKm / settings.resolution;
+  return {
+    heightM: Math.round((2000 * Math.sqrt(s)) / 10) * 10,
+    widthKm: Math.max(Math.round(40 * s * 10) / 10, Math.round(cellKm * 6 * 10) / 10),
+  };
+}
+
+/** Rounds to the nearest 1, 2 or 5 × a power of ten. */
+export function niceKm(v: number): number {
+  const p = Math.pow(10, Math.floor(Math.log10(v)));
+  const m = v / p;
+  return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * p;
+}
+
+/**
+ * A km slider range tuned for an 800 km map, rescaled for this one. Distances
+ * scale with the map's size; terrain features (`feature`) with lengthScale.
+ */
+export function kmRange(settings: WorldSettings, min: number, max: number, step: number, feature = false): { min: number; max: number; step: number } {
+  const k = feature ? lengthScale(settings.widthKm, settings.heightKm) : Math.max(settings.widthKm, settings.heightKm) / 800;
+  if (k === 1) return { min, max, step };
+  const st = niceKm(step * k);
+  const snap = (v: number) => Math.round(v / st) * st;
+  return { min: Math.max(min === 0 ? 0 : st, snap(min * k)), max: snap(max * k), step: st };
+}
 
 export function emptyLayer(w: number, h: number): PaintLayer {
   return { w, h, data: new Uint8Array(w * h) };

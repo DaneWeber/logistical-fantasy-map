@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { uid } from '../engine/doc';
+import { defaultRidge, uid } from '../engine/doc';
 import { cellAt, dist } from '../engine/grid';
 import { LANDFORM_PAINT, LANDSEA, type Vec, type WorldDoc } from '../engine/types';
 import {
@@ -82,6 +82,21 @@ export function MapView({ world, tool, setTool, brushKm, layers, selection, setS
   const [dragTick, setDragTick] = useState(0);
 
   const scene = useMemo(() => (result ? new Scene(result) : null), [result]);
+  // Detail tiles arrive from workers; redraw as each one lands.
+  const [tileTick, setTileTick] = useState(0);
+  useEffect(() => {
+    if (!scene) return;
+    let queued = false;
+    scene.tiles.setListener(() => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => {
+        queued = false;
+        setTileTick((t) => t + 1);
+      });
+    });
+    return () => scene.dispose();
+  }, [scene]);
   const working = dragRef.current?.mode === 'brush' ? dragRef.current.working : doc;
   const overlay = useMemo(() => paintOverlay(working), [working.paint, dragTick]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -270,7 +285,7 @@ export function MapView({ world, tool, setTool, brushKm, layers, selection, setS
     }
 
     drawScaleBar(ctx, view, H);
-  }, [scene, view, size, layers, doc, result, selection, drawing, cursor, tool, brushKm, overlay, placePositions, working, dragTick]);
+  }, [scene, view, size, layers, doc, result, selection, drawing, cursor, tool, brushKm, overlay, placePositions, working, dragTick, tileTick]);
 
   // ---------------------------------------------------------------- input
   const toWorld = (e: { clientX: number; clientY: number }): Vec => {
@@ -461,7 +476,7 @@ export function MapView({ world, tool, setTool, brushKm, layers, selection, setS
       const id = uid('ridge');
       update((d) => ({
         ...d,
-        ridges: [...d.ridges, { id, name: `Ridge ${d.ridges.length + 1}`, points: clean, heightM: 2000, widthKm: 40 }],
+        ridges: [...d.ridges, { id, name: `Ridge ${d.ridges.length + 1}`, points: clean, ...defaultRidge(d.settings) }],
       }));
       setSelection({ kind: 'ridge', id });
     } else if (tool === 'river') {
@@ -494,7 +509,8 @@ export function MapView({ world, tool, setTool, brushKm, layers, selection, setS
     const r = canvasRef.current!.getBoundingClientRect();
     const s: Vec = [e.clientX - r.left, e.clientY - r.top];
     const before = screenToWorld(view, size.W, size.H, s);
-    const k = Math.min(40, Math.max(0.2, view.k * Math.exp(-e.deltaY * 0.0015)));
+    // From a whole continent down to a few hundred metres across.
+    const k = Math.min(2000, Math.max(0.05, view.k * Math.exp(-e.deltaY * 0.0015)));
     const nv = { ...view, k };
     const after = screenToWorld(nv, size.W, size.H, s);
     setView({ k, cx: view.cx + before[0] - after[0], cy: view.cy + before[1] - after[1] });

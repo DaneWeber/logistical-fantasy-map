@@ -1,4 +1,4 @@
-import { boxBlur, polylineField, rasterizePolyline, sample } from './grid';
+import { boxBlur, lengthScale, polylineField, rasterizePolyline, sample } from './grid';
 import { fbm, lerp, makeNoise2D, ridged, smoothstep } from './noise';
 import { hashString, mix } from './rng';
 import {
@@ -38,9 +38,12 @@ export function buildTerrain(doc: WorldDoc, g: Grid, implicit: ImplicitFeatures)
   const n = w * H;
   const maxDim = Math.max(g.widthKm, g.heightKm);
   const fc = 1.7 / maxDim;
-  const fd = 1 / 45;
+  // Feature sizes and relief shrink on small maps (see lengthScale).
+  const ls = lengthScale(g.widthKm, g.heightKm);
+  const rs = Math.sqrt(ls);
+  const fd = 1 / (45 * ls);
   const fm = 2.4 / maxDim;
-  const fr = 1 / 150;
+  const fr = 1 / (150 * ls);
 
   // 1. Continent field: positive is land.
   const c = new Float32Array(n);
@@ -83,7 +86,7 @@ export function buildTerrain(doc: WorldDoc, g: Grid, implicit: ImplicitFeatures)
     const f = polylineField(g, [b.pos], b.radiusKm);
     for (let i = 0; i < n; i++) if (f.d[i] < Infinity) impLandM[i] = 1;
   }
-  const pr = Math.max(1, Math.round(3 / cellKm));
+  const pr = Math.max(1, Math.round((3 * ls) / cellKm));
   const landB = boxBlur(landM, w, H, pr, 2);
   const seaB = boxBlur(seaM, w, H, pr, 2);
   const impLandB = boxBlur(impLandM, w, H, 1);
@@ -104,7 +107,7 @@ export function buildTerrain(doc: WorldDoc, g: Grid, implicit: ImplicitFeatures)
     const target = lc.kind === 'plains' ? plainsM : hillsM;
     for (let i = 0; i < n; i++) if (f.d[i] < Infinity) target[i] = 1;
   }
-  const lr = Math.max(1, Math.round(6 / cellKm));
+  const lr = Math.max(1, Math.round((6 * ls) / cellKm));
   const plainsW = boxBlur(plainsM, w, H, lr, 2);
   const hillsW = boxBlur(hillsM, w, H, lr, 2);
   const mtnW = boxBlur(mtnM, w, H, lr, 2);
@@ -124,7 +127,7 @@ export function buildTerrain(doc: WorldDoc, g: Grid, implicit: ImplicitFeatures)
       const prof = (1 - t * t) ** 2;
       const endDist = Math.min(f.along[i], f.length - f.along[i]);
       const taper = f.length === 0 ? 1 : 0.5 + 0.5 * smoothstep(0, Math.min(halfW * 1.2, f.length / 2), endDist);
-      const crest = r.heightM * (0.8 + 0.3 * nA(f.along[i] / 30, k * 7.7)) * taper;
+      const crest = r.heightM * (0.8 + 0.3 * nA(f.along[i] / (30 * ls), k * 7.7)) * taper;
       if (crest * prof > ridgeH[i]) ridgeH[i] = crest * prof;
       if (prof > ridgeP[i]) ridgeP[i] = prof;
     }
@@ -134,7 +137,7 @@ export function buildTerrain(doc: WorldDoc, g: Grid, implicit: ImplicitFeatures)
   const riverLand = new Float32Array(n);
   for (const rv of doc.rivers) {
     if (rv.points.length < 2) continue;
-    const reach = rv.valleyWidthKm / 2 + Math.max(6, cellKm * 2);
+    const reach = rv.valleyWidthKm / 2 + Math.max(6 * ls, cellKm * 2);
     const f = polylineField(g, rv.points, reach);
     for (let i = 0; i < n; i++) {
       if (f.d[i] === Infinity) continue;
@@ -151,8 +154,8 @@ export function buildTerrain(doc: WorldDoc, g: Grid, implicit: ImplicitFeatures)
   for (let i = 0; i < n; i++) {
     const x = ((i % w) + 0.5) * cellKm;
     const y = (Math.floor(i / w) + 0.5) * cellKm;
-    const wx = nW(x / 60, y / 60) * 9;
-    const wy = nW(x / 60 + 71, y / 60 - 33) * 9;
+    const wx = nW(x / (60 * ls), y / (60 * ls)) * 9 * ls;
+    const wy = nW(x / (60 * ls) + 71, y / (60 * ls) - 33) * 9 * ls;
     let cc = c[i];
     const mL = sample(g, landB, [x + wx, y + wy]);
     const mS = sample(g, seaB, [x + wx, y + wy]);
@@ -172,8 +175,8 @@ export function buildTerrain(doc: WorldDoc, g: Grid, implicit: ImplicitFeatures)
     const rid = ridged(nR, x * fr, y * fr, 5);
     const mtn = S.maxElevationM * 0.9 * mm * Math.pow(rid, 1.6);
     const detail = fbm(nD, x * fd, y * fd, 5);
-    const hillAmp = (60 + 280 * S.roughness) * (1 - 0.85 * plainsW[i]) * (1 + 1.8 * hillsW[i]) + 300 * mm;
-    const base = cc * (cc >= 0 ? 650 : 3000) + 30 * landF;
+    const hillAmp = ((60 + 280 * S.roughness) * (1 - 0.85 * plainsW[i]) * (1 + 1.8 * hillsW[i]) + 300 * mm) * rs;
+    const base = cc * (cc >= 0 ? 650 * rs : 3000) + 30 * landF;
     const ridgeTerm = ridgeH[i] * (0.7 + 0.45 * rid);
     let v = base + landF * (detail * hillAmp * 0.6 + hillAmp * 0.3 * hillsW[i] + mtn + ridgeTerm);
     if (cc > 0) v = Math.max(v, 2 + cc * 40);
@@ -201,7 +204,7 @@ export function applyLock(doc: WorldDoc, g: Grid, h: Float32Array): void {
     }
   }
   if (!any) return;
-  const r = Math.max(2, Math.round(6 / g.cellKm));
+  const r = Math.max(2, Math.round((6 * lengthScale(g.widthKm, g.heightKm)) / g.cellKm));
   const lb = boxBlur(lock, g.w, g.h, r);
   const wb = boxBlur(weighted, g.w, g.h, r);
   for (let i = 0; i < n; i++) {
@@ -218,17 +221,17 @@ export function applyLock(doc: WorldDoc, g: Grid, h: Float32Array): void {
  * two-click river isn't ruler-straight. The bends vanish at every vertex, so
  * the course still passes exactly through each point the user placed.
  */
-export function meander(pts: Vec[], seed: number, cellKm: number): Vec[] {
+export function meander(pts: Vec[], seed: number, cellKm: number, ls = 1): Vec[] {
   const out: Vec[] = [pts[0]];
   for (let i = 1; i < pts.length; i++) {
     const [a, b] = [pts[i - 1], pts[i]];
     const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
     const steps = Math.max(1, Math.round(L / cellKm));
-    const amp = L < cellKm * 4 ? 0 : Math.min(L * 0.06, 7);
+    const amp = L < cellKm * 4 ? 0 : Math.min(L * 0.06, 7 * ls);
     const nx = -(b[1] - a[1]) / (L || 1);
     const ny = (b[0] - a[0]) / (L || 1);
     const ph = ((seed + i * 977) % 1000) / 159;
-    const waves = Math.max(1, Math.round(L / 45));
+    const waves = Math.max(1, Math.round(L / (45 * ls)));
     for (let k = 1; k <= steps; k++) {
       const t = k / steps;
       const off = amp * Math.sin(Math.PI * t) * (0.7 * Math.sin(2 * Math.PI * waves * t + ph) + 0.3 * Math.sin(5.3 * Math.PI * waves * t + ph * 2));
@@ -253,7 +256,7 @@ export function carveRivers(g: Grid, h: Float32Array, rivers: RiverFeature[], ri
   const warnings: string[] = [];
   for (const rv of rivers) {
     if (rv.points.length < 2) continue;
-    let cells = rasterizePolyline(g, meander(rv.points, hashString(rv.id), g.cellKm));
+    let cells = rasterizePolyline(g, meander(rv.points, hashString(rv.id), g.cellKm, lengthScale(g.widthKm, g.heightKm)));
     if (cells.length < 2) continue;
     const first = cells[0];
     const last = cells[cells.length - 1];

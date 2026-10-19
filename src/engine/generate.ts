@@ -8,7 +8,10 @@ import { applyLock, breachAt, buildTerrain, carveRivers } from './terrain';
 import { WATER, type Grid, type ImplicitFeatures, type ResolvedPlace, type Vec, type WorldDoc, type WorldResult } from './types';
 
 export function riverThreshold(doc: WorldDoc): number {
-  return 1500 * Math.pow(0.1, doc.settings.riverDensity);
+  // Below 800 km the threshold shrinks with map area, so a small map shows its
+  // creeks at the same density a big one shows its rivers.
+  const f = Math.min(1, Math.max(doc.settings.widthKm, doc.settings.heightKm) / 800);
+  return 1500 * Math.pow(0.1, doc.settings.riverDensity) * f * f;
 }
 
 interface Pass {

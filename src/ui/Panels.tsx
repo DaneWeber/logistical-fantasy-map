@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { DEFAULT_SETTINGS, deserialize, emptyLayer, newDoc, serialize, uid } from '../engine/doc';
+import { DEFAULT_SETTINGS, deserialize, emptyLayer, kmRange, newDoc, serialize, uid } from '../engine/doc';
 import { exampleDoc } from '../engine/example';
 import { makeGrid } from '../engine/grid';
 import {
@@ -57,6 +57,14 @@ function Slider(props: { label: string; value: number; min: number; max: number;
     </Field>
   );
 }
+
+/** Starting points for common map scales; a locale also gets lower peaks. */
+const MAP_PRESETS = [
+  { label: 'Locale', w: 16, h: 16, peaksM: 1200 },
+  { label: 'Region', w: 200, h: 150, peaksM: 2500 },
+  { label: 'Realm', w: 800, h: 600, peaksM: 3000 },
+  { label: 'Continent', w: 1600, h: 1200, peaksM: 4000 },
+];
 
 function NumberInput({ value, onChange, placeholder }: { value?: number; onChange: (v?: number) => void; placeholder?: string }) {
   return (
@@ -171,7 +179,9 @@ function PlaceEditor({
   setPlace: (id: string, patch: Partial<Place>) => void;
   setSelection: (s: Selection) => void;
 }) {
-  const { result, update } = world;
+  const { doc, result, update } = world;
+  const radius = kmRange(doc.settings, 5, 300, 5);
+  const defaultRadius = radius.step * Math.round(50 / 5);
   const resolved = result?.places.find((p) => p.id === place.id);
   const [name, setName] = useState(place.name);
   const pos = resolved?.pos ?? place.pos;
@@ -193,7 +203,7 @@ function PlaceEditor({
             <button
               key={m}
               className={place.mode === m ? 'on' : ''}
-              onClick={() => setPlace(place.id, { mode: m, pos: m === 'free' ? place.pos : (place.pos ?? pos), radiusKm: place.radiusKm ?? 50 })}
+              onClick={() => setPlace(place.id, { mode: m, pos: m === 'free' ? place.pos : (place.pos ?? pos), radiusKm: place.radiusKm ?? defaultRadius })}
             >
               {m === 'fixed' ? 'Exactly here' : m === 'near' ? 'Near here' : 'Anywhere'}
             </button>
@@ -201,7 +211,7 @@ function PlaceEditor({
         </div>
       </Field>
       {place.mode === 'near' && (
-        <Slider label="Within" unit=" km" value={place.radiusKm ?? 50} min={5} max={300} step={5} onChange={(v) => setPlace(place.id, { radiusKm: v })} />
+        <Slider label="Within" unit=" km" value={place.radiusKm ?? defaultRadius} {...radius} onChange={(v) => setPlace(place.id, { radiusKm: v })} />
       )}
       <p className="help">
         {place.mode === 'fixed'
@@ -406,9 +416,7 @@ export function TerrainPanel({ world, selection, setSelection }: { world: World;
                 label="Width"
                 unit=" km"
                 value={r.widthKm}
-                min={8}
-                max={150}
-                step={2}
+                {...kmRange(doc.settings, 8, 150, 2, true)}
                 onChange={(v) => update((d) => ({ ...d, ridges: d.ridges.map((x) => (x.id === r.id ? { ...x, widthKm: v } : x)) }))}
               />
               <p className="help">Drag the white handles on the map to reshape it.</p>
@@ -449,9 +457,7 @@ export function TerrainPanel({ world, selection, setSelection }: { world: World;
                 label="Valley width"
                 unit=" km"
                 value={r.valleyWidthKm}
-                min={0}
-                max={40}
-                step={1}
+                {...kmRange(doc.settings, 0, 40, 1, true)}
                 hint="0 = just a channel"
                 onChange={(v) => update((d) => ({ ...d, rivers: d.rivers.map((x) => (x.id === r.id ? { ...x, valleyWidthKm: v } : x)) }))}
               />
@@ -600,19 +606,31 @@ export function WorldPanel({ world, onExport, onFit }: { world: World; onExport:
         label="Min spacing"
         unit=" km"
         value={S.minTownSpacingKm}
-        min={0}
-        max={100}
-        step={5}
+        {...kmRange(S, 0, 100, 5)}
         onChange={(v) => set({ minTownSpacingKm: v })}
         hint="between any two places"
       />
 
       <h3>Map size</h3>
       <div className="row">
-        <NumberInput value={S.widthKm} onChange={(v) => v && v >= 50 && resize({ widthKm: v })} />
+        <NumberInput value={S.widthKm} onChange={(v) => v && v >= 5 && resize({ widthKm: v })} />
         <span>×</span>
-        <NumberInput value={S.heightKm} onChange={(v) => v && v >= 50 && resize({ heightKm: v })} />
+        <NumberInput value={S.heightKm} onChange={(v) => v && v >= 5 && resize({ heightKm: v })} />
         <span>km</span>
+      </div>
+      <div className="row wrap">
+        {MAP_PRESETS.map((p) => (
+          <button
+            key={p.label}
+            title={`${p.w} × ${p.h} km`}
+            onClick={() => {
+              const next = { ...S, widthKm: p.w, heightKm: p.h };
+              resize({ widthKm: p.w, heightKm: p.h, maxElevationM: p.peaksM, minTownSpacingKm: kmRange(next, 0, 20, 5).max });
+            }}
+          >
+            {p.label}
+          </button>
+        ))}
       </div>
       <Field label="Detail" hint="cells across; higher is slower">
         <select value={S.resolution} onChange={(e) => resize({ resolution: +e.target.value })}>

@@ -1,5 +1,5 @@
 import { SITE_BIT, siteBits } from './analysis';
-import { cellAt, cellCenter, dist, sample } from './grid';
+import { cellAt, cellCenter, dist, lengthScale, sample } from './grid';
 import { makeName } from './names';
 import type { Rng } from './rng';
 import {
@@ -30,6 +30,20 @@ export interface PlacementCtx {
 export const MOUNTAIN_MIN_M = 1000;
 export const MOUNTAIN_RISE_M = 300;
 
+function ls(g: Grid): number {
+  return lengthScale(g.widthKm, g.heightKm);
+}
+
+/**
+ * What "mountains between" asks for on this map. 1000 m high and 300 m above
+ * both towns on big maps; scaled down with relief on small ones, where it
+ * reads as a ridge or high moor between two villages.
+ */
+export function mountainThresholds(g: Grid): { minM: number; riseM: number } {
+  const rs = Math.sqrt(ls(g));
+  return { minM: Math.round(MOUNTAIN_MIN_M * rs), riseM: Math.round(MOUNTAIN_RISE_M * rs) };
+}
+
 // ---------------------------------------------------------------------------
 // Constraint evaluation (shared by the solver and the final report)
 
@@ -57,7 +71,7 @@ export function crestBetween(ctx: PlacementCtx, a: Vec, b: Vec): { max: number; 
   return { max, at };
 }
 
-export function nearestRiverCell(ctx: PlacementCtx, p: Vec, tolKm = 3): number {
+export function nearestRiverCell(ctx: PlacementCtx, p: Vec, tolKm = 3 * ls(ctx.g)): number {
   const { g } = ctx;
   const c = cellAt(g, p);
   const R = Math.max(1, Math.ceil(tolKm / g.cellKm));
@@ -118,13 +132,15 @@ export function constraintPenalty(ctx: PlacementCtx, c: Constraint, a: Vec, b: V
     case 'mountainsBetween': {
       const { max } = crestBetween(ctx, a, b);
       const ends = Math.max(landHeight(ctx, a), landHeight(ctx, b));
-      return Math.max(0, (MOUNTAIN_MIN_M - max) / MOUNTAIN_MIN_M) + Math.max(0, (MOUNTAIN_RISE_M - (max - ends)) / MOUNTAIN_RISE_M);
+      const { minM, riseM } = mountainThresholds(ctx.g);
+      return Math.max(0, (minM - max) / minM) + Math.max(0, (riseM - (max - ends)) / riseM);
     }
     case 'sameRiver': {
-      const tol = Math.max(3, ctx.g.cellKm * 1.5);
+      const tol = Math.max(3 * ls(ctx.g), ctx.g.cellKm * 1.5);
       const { ra, rb, gapKm } = riverConnection(ctx, a, b);
       if (ra < 0 || rb < 0) return 1 + (ra < 0 ? 0.5 : 0) + (rb < 0 ? 0.5 : 0);
-      return gapKm <= tol ? 0 : 1 + Math.min(gapKm, 300) / 300;
+      const far = 300 * ls(ctx.g);
+      return gapKm <= tol ? 0 : 1 + Math.min(gapKm, far) / far;
     }
   }
 }
@@ -146,12 +162,13 @@ export function describeConstraint(ctx: PlacementCtx, c: Constraint, a: Vec, b: 
     }
     case 'mountainsBetween': {
       const { max } = crestBetween(ctx, a, b);
+      const { minM, riseM } = mountainThresholds(ctx.g);
       return {
         id: c.id,
         ok,
         message: ok
           ? `Mountains between ${an} and ${bn} (crest ${Math.round(max)} m)`
-          : `No mountains between ${an} and ${bn} (highest ground ${Math.round(max)} m; need ≥ ${MOUNTAIN_MIN_M} m and ${MOUNTAIN_RISE_M} m above both)`,
+          : `No mountains between ${an} and ${bn} (highest ground ${Math.round(max)} m; need ≥ ${minM} m and ${riseM} m above both)`,
       };
     }
     case 'sameRiver': {
@@ -211,6 +228,7 @@ export function solvePlacement(
 ): Solution {
   const { g } = ctx;
   const n = g.w * g.h;
+  const L = ls(g);
   const pos = new Map<string, Vec>();
   const relaxed = new Set<string>();
   const ids = new Set(places.map((p) => p.id));
@@ -227,7 +245,7 @@ export function solvePlacement(
     }
     const req = siteBits(p.sites);
     const center = p.mode === 'near' ? p.pos : undefined;
-    const r = p.radiusKm ?? 50;
+    const r = p.radiusKm ?? 50 * L;
     const inRange = (i: number) => !center || dist(cellCenter(g, i), center) <= r;
     let domain = landCells.filter((i) => inRange(i) && (ctx.siteMask[i] & req) === req);
     let isRelaxed = false;
@@ -268,7 +286,7 @@ export function solvePlacement(
       if (d < minSpacingKm) s += (0.5 * (minSpacingKm - d)) / minSpacingKm;
     }
     const hnt = hints[v.place.id];
-    if (hnt) s += hintWeight * Math.min(1, dist(p, hnt) / 300);
+    if (hnt) s += hintWeight * Math.min(1, dist(p, hnt) / (300 * L));
     return s;
   };
 
@@ -281,13 +299,13 @@ export function solvePlacement(
     const hnt = hints[v.place.id];
     if (hnt) {
       add(cellAt(g, hnt));
-      for (let j = 0; j < 8; j++) add(cellAt(g, [hnt[0] + rng.range(-15, 15), hnt[1] + rng.range(-15, 15)]));
+      for (let j = 0; j < 8; j++) add(cellAt(g, [hnt[0] + rng.range(-15 * L, 15 * L), hnt[1] + rng.range(-15 * L, 15 * L)]));
     }
     const c0 = cur.get(v.place.id);
     if (c0 != null) {
       out.push(c0);
       const p0 = cellCenter(g, c0);
-      for (let j = 0; j < 8; j++) add(cellAt(g, [p0[0] + rng.range(-25, 25), p0[1] + rng.range(-25, 25)]));
+      for (let j = 0; j < 8; j++) add(cellAt(g, [p0[0] + rng.range(-25 * L, 25 * L), p0[1] + rng.range(-25 * L, 25 * L)]));
     }
     for (const c of v.cons) {
       const other = c.a === v.place.id ? c.b : c.a;
@@ -295,14 +313,14 @@ export function solvePlacement(
       if (!po) continue;
       if (c.type === 'distance') {
         const lo = c.minKm ?? 0;
-        const hi = c.maxKm ?? Math.max(lo * 1.6, lo + 80);
+        const hi = c.maxKm ?? Math.max(lo * 1.6, lo + 80 * L);
         for (let j = 0; j < 24; j++) {
           const a = rng.next() * Math.PI * 2;
           const r = rng.range(lo, hi);
           add(cellAt(g, [po[0] + Math.cos(a) * r, po[1] + Math.sin(a) * r]));
         }
       } else if (c.type === 'sameRiver') {
-        let rc = nearestRiverCell(ctx, po, 6);
+        let rc = nearestRiverCell(ctx, po, 6 * L);
         const path: number[] = [];
         for (let s = 0; rc >= 0 && s < 2000 && ctx.water[rc] !== WATER.ocean; s++) {
           path.push(rc);

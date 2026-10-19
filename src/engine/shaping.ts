@@ -1,4 +1,4 @@
-import { boxBlur, cellAt, cellCenter, dist, sample } from './grid';
+import { boxBlur, cellAt, cellCenter, dist, lengthScale, sample } from './grid';
 import { constraintPenalty, nearestRiverCell, unmetSites, type PlacementCtx, type Solution } from './placement';
 import { subRng, type Rng } from './rng';
 import { WATER, type ImplicitFeatures, type SiteKind, type Vec, type WorldDoc } from './types';
@@ -46,9 +46,13 @@ export function deriveImplicit(doc: WorldDoc, ctx: PlacementCtx, sol: Solution):
   const out = emptyImplicit();
   const { g } = ctx;
   const n = g.w * g.h;
+  // Implicit features are sized for an 800 km map; small maps shrink them
+  // (lengths by ks, heights by hs) so a locale doesn't get a 40 km ridge.
+  const ks = lengthScale(g.widthKm, g.heightKm);
+  const hs = Math.sqrt(ks);
   const landH = new Float32Array(n);
   for (let i = 0; i < n; i++) landH[i] = ctx.water[i] === WATER.ocean ? 0 : ctx.surface[i];
-  const smooth = boxBlur(landH, g.w, g.h, Math.max(2, Math.round(10 / g.cellKm)), 2);
+  const smooth = boxBlur(landH, g.w, g.h, Math.max(2, Math.round((10 * ks) / g.cellKm)), 2);
 
   const upDir = (p: Vec, rng: Rng): Vec => {
     const e = g.cellKm * 3;
@@ -133,7 +137,7 @@ export function deriveImplicit(doc: WorldDoc, ctx: PlacementCtx, sol: Solution):
   /** Pins the two largest streams meeting near p. */
   const anchorConfluence = (p: Vec, id: string, name: string): ImplicitFeatures['rivers'] => {
     const c0 = cellAt(g, p);
-    const R = Math.max(1, Math.ceil(6 / g.cellKm));
+    const R = Math.max(1, Math.ceil((6 * ks) / g.cellKm));
     for (let dy = -R; dy <= R; dy++)
       for (let dx = -R; dx <= R; dx++) {
         const x = (c0 % g.w) + dx;
@@ -186,7 +190,7 @@ export function deriveImplicit(doc: WorldDoc, ctx: PlacementCtx, sol: Solution):
     const inSea = ctx.water[cellAt(g, p)] === WATER.ocean;
     const unmet = new Set<SiteKind>(unmetSites(ctx, place.sites, p));
     if (inSea && place.sites.length === 0) {
-      out.landBlobs.push({ pos: p, radiusKm: 8 + g.cellKm * 2 });
+      out.landBlobs.push({ pos: p, radiusKm: 8 * ks + g.cellKm * 2 });
       out.notes.push(`${place.name} sat in the sea; raised land under it.`);
     }
     if (unmet.size === 0) continue;
@@ -203,19 +207,19 @@ export function deriveImplicit(doc: WorldDoc, ctx: PlacementCtx, sol: Solution):
       if (inSea) {
         const l = nearestLand(p);
         const dir = l && dist(l, p) > 0.1 ? norm([l[0] - p[0], l[1] - p[1]]) : up;
-        const r = 7 + g.cellKm * 2;
+        const r = 7 * ks + g.cellKm * 2;
         out.landBlobs.push({ pos: add(p, dir, r * 0.75), radiusKm: r });
         out.notes.push(`Raised a headland so ${place.name} sits on the coast.`);
       } else if (!(ctx.siteMask[cellAt(g, p)] & 2)) {
         const o = nearestOcean(p)!;
         const d = dist(o, p);
         const dir = norm([p[0] - o[0], p[1] - o[1]]);
-        const width = Math.max(5, g.cellKm * 2.5);
+        const width = Math.max(5 * ks, g.cellKm * 2.5);
         const tip = add(p, dir, -(width / 2 + g.cellKm * 0.5));
-        out.seaStrokes.push({ points: [add(o, dir, -10), tip], widthKm: width });
+        out.seaStrokes.push({ points: [add(o, dir, -10 * ks), tip], widthKm: width });
         out.landBlobs.push({ pos: p, radiusKm: g.cellKm * 1.2 });
         out.notes.push(
-          d > 60
+          d > 60 * ks
             ? `${place.name} must be coastal but the sea was ${Math.round(d)} km away — cut a long inlet. Consider painting sea nearby.`
             : `Cut an inlet so ${place.name} sits on the coast.`,
         );
@@ -230,47 +234,47 @@ export function deriveImplicit(doc: WorldDoc, ctx: PlacementCtx, sol: Solution):
       out.rivers.push({
         id: `auto-mouth-${place.id}`,
         name: tag,
-        points: [add(p, rot(inland, rng.range(-25, 25)), 45), p, add(p, inland, -reach)],
-        valleyWidthKm: 2,
+        points: [add(p, rot(inland, rng.range(-25, 25)), 45 * ks), p, add(p, inland, -reach)],
+        valleyWidthKm: 2 * ks,
       });
     }
     if (unmet.has('river')) {
-      out.rivers.push({ id: `auto-river-${place.id}`, name: tag, points: [add(p, rot(up, rng.range(-20, 20)), 35), p, ...downstream(p)], valleyWidthKm: 0 });
+      out.rivers.push({ id: `auto-river-${place.id}`, name: tag, points: [add(p, rot(up, rng.range(-20, 20)), 35 * ks), p, ...downstream(p)], valleyWidthKm: 0 });
     }
     if (unmet.has('confluence')) {
-      out.rivers.push({ id: `auto-conf1-${place.id}`, name: tag, points: [add(p, rot(up, 40), 35), p, ...downstream(p)], valleyWidthKm: 0 });
-      out.rivers.push({ id: `auto-conf2-${place.id}`, name: tag, points: [add(p, rot(up, -40), 35), p], valleyWidthKm: 0 });
+      out.rivers.push({ id: `auto-conf1-${place.id}`, name: tag, points: [add(p, rot(up, 40), 35 * ks), p, ...downstream(p)], valleyWidthKm: 0 });
+      out.rivers.push({ id: `auto-conf2-${place.id}`, name: tag, points: [add(p, rot(up, -40), 35 * ks), p], valleyWidthKm: 0 });
     }
     if (unmet.has('valley')) {
       const down = downstream(p);
-      const split = down.findIndex((q) => dist(q, p) > 30);
+      const split = down.findIndex((q) => dist(q, p) > 30 * ks);
       const head = split < 0 ? down : down.slice(0, split + 1);
-      out.rivers.push({ id: `auto-valley-${place.id}`, name: tag, points: [add(p, up, 40), p, ...head], valleyWidthKm: 10 });
+      out.rivers.push({ id: `auto-valley-${place.id}`, name: tag, points: [add(p, up, 40 * ks), p, ...head], valleyWidthKm: 10 * ks });
       if (split >= 0) out.rivers.push({ id: `auto-valley-out-${place.id}`, name: tag, points: down.slice(split), valleyWidthKm: 0 });
       const side = perp(up);
       for (const s of [1, -1]) {
         out.ridges.push({
           id: `auto-valleyside${s}-${place.id}`,
           name: tag,
-          points: [add(add(p, side, 18 * s), up, 45), add(add(p, side, 18 * s), up, -25)],
-          heightM: 800,
-          widthKm: 20,
+          points: [add(add(p, side, 18 * s * ks), up, 45 * ks), add(add(p, side, 18 * s * ks), up, -25 * ks)],
+          heightM: 800 * hs,
+          widthKm: 20 * ks,
         });
       }
     }
     if (unmet.has('mountains') || unmet.has('ridge')) {
       const along = perp(up);
-      const L = unmet.has('ridge') ? 40 : 45;
+      const L = (unmet.has('ridge') ? 40 : 45) * ks;
       out.ridges.push({
         id: `auto-mtn-${place.id}`,
         name: tag,
         points: [add(p, along, -L), add(p, rot(along, rng.range(-10, 10)), 0.01), add(p, rot(along, rng.range(-15, 15)), L)],
-        heightM: Math.max(1600, doc.settings.maxElevationM * 0.75),
-        widthKm: unmet.has('ridge') ? 28 : 40,
+        heightM: Math.max(1600, doc.settings.maxElevationM * 0.75) * hs,
+        widthKm: (unmet.has('ridge') ? 28 : 40) * ks,
       });
     }
-    if (unmet.has('hills')) out.landformCircles.push({ pos: p, radiusKm: 25, kind: 'hills' });
-    if (unmet.has('plain')) out.landformCircles.push({ pos: p, radiusKm: 30, kind: 'plains' });
+    if (unmet.has('hills')) out.landformCircles.push({ pos: p, radiusKm: 25 * ks, kind: 'hills' });
+    if (unmet.has('plain')) out.landformCircles.push({ pos: p, radiusKm: 30 * ks, kind: 'plains' });
     if (unmet.has('lakeshore')) out.notes.push(`Can't create a lake for ${place.name} automatically; move it near a lake or drop the requirement.`);
   }
 
@@ -287,8 +291,8 @@ export function deriveImplicit(doc: WorldDoc, ctx: PlacementCtx, sol: Solution):
     const tag = `auto: ${place.name}`;
     if (met.includes('confluence')) anchors.push(...anchorConfluence(p, `anchor-${place.id}`, tag));
     else if (met.some((s) => RIVERISH.includes(s))) anchors.push(...anchorRiver(p, `anchor-${place.id}`, tag));
-    if (met.includes('plain')) anchorCircles.push({ pos: p, radiusKm: 20, kind: 'plains' });
-    if (met.includes('hills')) anchorCircles.push({ pos: p, radiusKm: 20, kind: 'hills' });
+    if (met.includes('plain')) anchorCircles.push({ pos: p, radiusKm: 20 * ks, kind: 'plains' });
+    if (met.includes('hills')) anchorCircles.push({ pos: p, radiusKm: 20 * ks, kind: 'hills' });
   }
 
   for (const c of doc.constraints) {
@@ -309,25 +313,25 @@ export function deriveImplicit(doc: WorldDoc, ctx: PlacementCtx, sol: Solution):
     const rng = subRng(doc.seed, 'shape:' + c.id);
     const L = dist(a, b);
     if (c.type === 'mountainsBetween') {
-      if (L < 16) {
+      if (L < 16 * ks) {
         out.notes.push(`${an} and ${bn} are only ${Math.round(L)} km apart — too close to fit mountains between them.`);
         continue;
       }
       const u = norm([b[0] - a[0], b[1] - a[1]]);
       const v = perp(u);
       const m = add([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], u, rng.range(-0.08, 0.08) * L);
-      const span = Math.max(0.9 * L, 120);
+      const span = Math.max(0.9 * L, 120 * ks);
       out.ridges.push({
         id: `auto-between-${c.id}`,
         name: `auto: range between ${an} & ${bn}`,
         points: [add(add(m, v, -span / 2), u, rng.range(-0.1, 0.1) * L), m, add(add(m, v, span / 2), u, rng.range(-0.1, 0.1) * L)],
-        heightM: Math.max(1800, doc.settings.maxElevationM * 0.8),
-        widthKm: Math.min(45, L - 14),
+        heightM: Math.max(1800, doc.settings.maxElevationM * 0.8) * hs,
+        widthKm: Math.min(45 * ks, L - 14 * ks),
       });
     } else if (c.type === 'sameRiver') {
       const [hi, lo] = sample(g, ctx.surface, a) >= sample(g, ctx.surface, b) ? [a, b] : [b, a];
       const dir = L > 0.1 ? norm([hi[0] - lo[0], hi[1] - lo[1]]) : upDir(hi, rng);
-      out.rivers.push({ id: `auto-same-${c.id}`, name: `auto: river through ${an} & ${bn}`, points: [add(hi, dir, 25), hi, lo, ...downstream(lo)], valleyWidthKm: 3 });
+      out.rivers.push({ id: `auto-same-${c.id}`, name: `auto: river through ${an} & ${bn}`, points: [add(hi, dir, 25 * ks), hi, lo, ...downstream(lo)], valleyWidthKm: 3 * ks });
     }
   }
   if (hasImplicit(out)) {

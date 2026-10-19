@@ -230,3 +230,13 @@ export function chaikin(pts: Vec[], iterations = 2): Vec[] {
   }
   return p;
 }
+
+/**
+ * How much smaller natural features should be on this map than on a
+ * continent-sized one. Most terrain constants were tuned for maps 800 km and
+ * up; a small locale shrinks them (sub-linearly, so a 15 km map still gets
+ * a few valleys rather than a miniature continent). 1 for maps ≥ 800 km.
+ */
+export function lengthScale(widthKm: number, heightKm: number): number {
+  return Math.min(1, Math.pow(Math.max(widthKm, heightKm) / 800, 0.7));
+}

@@ -263,3 +263,21 @@ describe('iterating', () => {
     expect(second.report[0].ok).toBe(true);
   });
 });
+
+describe('small maps', () => {
+  it('a 16 km locale has creeks, varied landforms and sane heights', () => {
+    const doc = newDoc(7, { widthKm: 16, heightKm: 16, resolution: 320 });
+    const r = generate(doc);
+    expect(r.rivers.length).toBeGreaterThan(5);
+    const forms = new Set(Array.from(r.landform));
+    expect(forms.size).toBeGreaterThanOrEqual(4);
+    for (const v of r.height) expect(Number.isFinite(v)).toBe(true);
+  });
+
+  it('places with site facts are satisfied on a locale map', () => {
+    const doc = withLand(newDoc(11, { widthKm: 16, heightKm: 16, resolution: 240 }), 3, 3, 13, 13);
+    doc.places.push({ id: 'm', name: 'Mill', kind: 'village', mode: 'fixed', pos: [8, 8], sites: ['river'] });
+    const r = generate(doc);
+    expect(r.places.find((p) => p.id === 'm')!.unmetSites).toEqual([]);
+  });
+});

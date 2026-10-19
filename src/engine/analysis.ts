@@ -1,4 +1,4 @@
-import { DIST8, DX8, DY8, boxBlur, cellCenter, chaikin, dilate, distanceTo, windowExtreme } from './grid';
+import { DIST8, DX8, DY8, boxBlur, cellCenter, chaikin, dilate, distanceTo, lengthScale, windowExtreme } from './grid';
 import type { Hydrology } from './hydrology';
 import { LANDFORM, WATER, type Grid, type Polyline, type SiteKind } from './types';
 
@@ -43,8 +43,12 @@ export function analyze(g: Grid, h: Float32Array, hy: Hydrology): Analysis {
 
   // Landform from local relief and topographic position (height relative to
   // the neighbourhood mean): that is what distinguishes valley from plain.
-  const rS = Math.max(1, Math.round(5 / cellKm));
-  const rL = Math.max(2, Math.round(14 / cellKm));
+  // Radii and relief thresholds shrink with the map (see lengthScale);
+  // absolute elevations stay absolute.
+  const ls = lengthScale(g.widthKm, g.heightKm);
+  const rs = Math.sqrt(ls);
+  const rS = Math.max(1, Math.round((5 * ls) / cellKm));
+  const rL = Math.max(2, Math.round((14 * ls) / cellKm));
   const maxS = windowExtreme(landH, w, H, rS, true);
   const minS = windowExtreme(landH, w, H, rS, false);
   const maxL = windowExtreme(landH, w, H, rL, true);
@@ -63,9 +67,9 @@ export function analyze(g: Grid, h: Float32Array, hy: Hydrology): Analysis {
     const s = surface[i];
     const reliefS = maxS[i] - minS[i];
     const reliefL = maxL[i] - minL[i];
-    if (valleyDepth[i] > Math.max(80, 0.25 * reliefL) && s < 1800) landform[i] = LANDFORM.valley;
-    else if (s > 1400 || reliefS > 650 || (s > 800 && reliefS > 300)) landform[i] = LANDFORM.mountains;
-    else if (reliefS > 160 || (s > 500 && reliefS > 100)) landform[i] = LANDFORM.hills;
+    if (valleyDepth[i] > Math.max(80 * rs, 0.25 * reliefL) && s < 1800) landform[i] = LANDFORM.valley;
+    else if (s > 1400 || reliefS > 650 * rs || (s > 800 && reliefS > 300 * rs)) landform[i] = LANDFORM.mountains;
+    else if (reliefS > 160 * rs || (s > 500 && reliefS > 100 * rs)) landform[i] = LANDFORM.hills;
     else if (s > 750) landform[i] = LANDFORM.plateau;
     else landform[i] = LANDFORM.plain;
   }
@@ -99,7 +103,7 @@ export function analyze(g: Grid, h: Float32Array, hy: Hydrology): Analysis {
   land.sort((a, b) => surface[a] - surface[b]);
   const accUp = new Float32Array(n).fill(1);
   for (const c of land) if (up[c] >= 0) accUp[up[c]] += accUp[c];
-  const T = Math.max(10, Math.round(220 / (cellKm * cellKm)));
+  const T = Math.max(10, Math.round((220 * ls * ls) / (cellKm * cellKm)));
   const ridge = new Uint8Array(n);
   for (const c of land) {
     const lf = landform[c];
@@ -129,7 +133,8 @@ export function analyze(g: Grid, h: Float32Array, hy: Hydrology): Analysis {
  */
 function twoSidedDepth(g: Grid, landH: Float32Array): Float32Array {
   const { w, h: H, cellKm } = g;
-  const sm = boxBlur(landH, w, H, Math.max(1, Math.round(2 / cellKm)));
+  const ls = lengthScale(g.widthKm, g.heightKm);
+  const sm = boxBlur(landH, w, H, Math.max(1, Math.round((2 * ls) / cellKm)));
   const out = new Float32Array(w * H);
   const axes = [
     [1, 0],
@@ -137,7 +142,7 @@ function twoSidedDepth(g: Grid, landH: Float32Array): Float32Array {
     [Math.SQRT1_2, Math.SQRT1_2],
     [Math.SQRT1_2, -Math.SQRT1_2],
   ];
-  const scales = [8, 16].map((km) => Math.max(2, km / cellKm));
+  const scales = [8, 16].map((km) => Math.max(2, (km * ls) / cellKm));
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < w; x++) {
       const i = y * w + x;

@@ -17,6 +17,7 @@ if (actions) {
     if (a.dbl) await page.mouse.dblclick(a.dbl[0], a.dbl[1]);
     if (a.drag) { await page.mouse.move(...a.drag[0]); await page.mouse.down(); for (const p of a.drag.slice(1)) await page.mouse.move(p[0], p[1], { steps: 5 }); await page.mouse.up(); }
     if (a.key) await page.keyboard.press(a.key);
+    if (a.wheel) { await page.mouse.move(a.wheel[0], a.wheel[1]); for (let s = 0; s < (a.wheel[3] ?? 1); s++) { await page.mouse.wheel(0, a.wheel[2]); await page.waitForTimeout(30); } }
     if (a.wait) await page.waitForTimeout(a.wait);
     if (a.waitGen) { await page.waitForTimeout(400); await page.waitForFunction(() => !document.querySelector('.busy'), null, { timeout: 30000 }); await page.waitForTimeout(300); }
     if (a.shot) await page.screenshot({ path: a.shot });

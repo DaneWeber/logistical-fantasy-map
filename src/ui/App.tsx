@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { LANDFORM_NAMES, SITE_KINDS, SITE_LABELS, WATER, type WorldDoc, type WorldResult } from '../engine/types';
 import { SITE_BIT } from '../engine/analysis';
+import { niceKm } from '../engine/doc';
 import { BRUSH_TOOLS, MapView, type HoverInfo, type Selection, type Tool } from './MapView';
 import { PlacesPanel, RulesPanel, TerrainPanel, ViewPanel, WorldPanel } from './Panels';
 import { DEFAULT_LAYERS, Scene, drawLineLabel, drawPlaces, drawScaleBar, drawTerrain, type Layers } from './render';
@@ -35,7 +36,8 @@ function exportPng(result: WorldResult, doc: WorldDoc, layers: Layers) {
   const ctx = c.getContext('2d')!;
   const view = { cx: result.grid.widthKm / 2, cy: result.grid.heightKm / 2, k: W / result.grid.widthKm };
   const scene = new Scene(result);
-  drawTerrain(ctx, scene, view, W, H, 1, layers);
+  drawTerrain(ctx, scene, view, W, H, 1, layers, true);
+  scene.dispose();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   if (layers.labels) {
     for (const r of doc.rivers) drawLineLabel(ctx, r.points, r.name, view, W, H, 'italic 13px Georgia, serif', '#2f5a80');
@@ -78,7 +80,12 @@ export function App() {
   const [layers, setLayers] = useState<Layers>(DEFAULT_LAYERS);
   const [selection, setSelectionRaw] = useState<Selection>(null);
   const [hover, setHover] = useState<HoverInfo | null>(null);
-  const [brushKm, setBrushKm] = useState(25);
+  // Brush sizes follow the map's width: 25 km on an 800 km map.
+  const mapKm = doc.settings.widthKm;
+  const brushMin = niceKm(mapKm / 300);
+  const brushMax = niceKm(mapKm / 5);
+  const [brushKm, setBrushKm] = useState(() => niceKm(mapKm / 32));
+  useEffect(() => setBrushKm(niceKm(mapKm / 32)), [mapKm]);
   const [fitSignal, setFitSignal] = useState(0);
 
   const setSelection = useCallback((s: Selection) => {
@@ -120,13 +127,13 @@ export function App() {
         const map: Record<string, Tool> = { v: 'select', p: 'place', r: 'ridge', w: 'river', m: 'measure' };
         const nt = map[e.key.toLowerCase()];
         if (nt) setTool(nt);
-        if (e.key === '[') setBrushKm((b) => Math.max(3, b - 5));
-        if (e.key === ']') setBrushKm((b) => Math.min(150, b + 5));
+        if (e.key === '[') setBrushKm((b) => Math.max(brushMin, +(b / 1.15).toPrecision(2)));
+        if (e.key === ']') setBrushKm((b) => Math.min(brushMax, +(b * 1.15).toPrecision(2)));
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [undo, redo, deleteSelection, tool]);
+  }, [undo, redo, deleteSelection, tool, brushMin, brushMax]);
 
   const failingRules = result?.report.filter((s) => !s.ok).length ?? 0;
   const failingPlaces = result?.places.filter((p) => p.unmetSites.length).length ?? 0;
@@ -175,7 +182,7 @@ export function App() {
         {BRUSH_TOOLS.includes(tool) && (
           <div className="tool-group">
             <div className="tool-group-label">Brush {brushKm} km</div>
-            <input type="range" min={3} max={150} value={brushKm} onChange={(e) => setBrushKm(+e.target.value)} />
+            <input type="range" min={brushMin} max={brushMax} step={brushMin} value={brushKm} onChange={(e) => setBrushKm(+e.target.value)} />
           </div>
         )}
       </nav>

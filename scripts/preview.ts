@@ -1,5 +1,5 @@
 // Dev aid: renders a generated world to a PNG without the browser.
-// Usage: npx vite-node scripts/preview.ts -- [seed] [out.png]
+// Usage: npx vite-node scripts/preview.ts -- [seed] [out.png] [widthKm] [heightKm]
 import { writeFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 import { newDoc } from '../src/engine/doc';
@@ -41,7 +41,8 @@ function png(w: number, h: number, rgb: Uint8Array): Buffer {
 const args = process.argv.slice(2).filter((a) => a !== '--');
 const seed = Number(args[0] ?? 12345);
 const out = args[1] ?? 'preview.png';
-const doc = newDoc(seed);
+const widthKm = Number(args[2] ?? 800);
+const doc = newDoc(seed, { widthKm, heightKm: Number(args[3] ?? (widthKm * 3) / 4) });
 const r = generate(doc);
 const { w, h } = r.grid;
 const S = 3;
